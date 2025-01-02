@@ -75,6 +75,42 @@ class Client(object):
         grad = grad / (len(self.train) * self.local_epoch * self.optim_config['lr'] / self.batch_size)
         return grad
 
+    @staticmethod
+    def rbf_kernel(x, y, sigma=1.0):
+        diff = x - y
+        dist_sq = torch.sum(diff * diff)
+        return torch.exp(-dist_sq / (2.0 * sigma ** 2))
+
+    def get_mmd_distance(self, sigma=1.0, device='cpu'):
+        local_state_dict = self.client_current.state_dict()
+        global_state_dict  = self.global_current.state_dict()
+        # 1) Flatten all parameter tensors in each state_dict into one vector.
+        local_params_list = []
+        global_params_list = []
+
+        for (local_key, local_val), (global_key, global_val) in zip(
+                local_state_dict.items(), global_state_dict.items()):
+            # flatten each parameter and move to device
+            local_params_list.append(local_val.view(-1).to(device))
+            global_params_list.append(global_val.view(-1).to(device))
+
+        local_flat = torch.cat(local_params_list, dim=0)
+        global_flat = torch.cat(global_params_list, dim=0)
+
+        # 2) For single-vector "distributions," we can define the naive MMD^2:
+        #       MMD^2 = K(x, x) + K(y, y) - 2 K(x, y)
+        #    Where x, y are single samples if we’re just comparing param vectors.
+
+        k_xx = self.rbf_kernel(local_flat, local_flat, sigma=sigma)
+        k_yy = self.rbf_kernel(global_flat, global_flat, sigma=sigma)
+        k_xy = self.rbf_kernel(local_flat, global_flat, sigma=sigma)
+
+        mmd_sq = k_xx + k_yy - 2.0 * k_xy
+        mmd = torch.sqrt(mmd_sq)  # MMD is the square root of MMD^2
+
+        # 3) Return a float distance
+        return mmd.detach()
+
     def __len__(self):
         """Return a total size of the client's local data."""
         return len(self.train)

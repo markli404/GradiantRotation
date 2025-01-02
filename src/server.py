@@ -44,6 +44,16 @@ class Server(object):
         # scaffold
         self.c_global = None
 
+        # DGT
+        self.cos_dict = None
+        self.ca4 = []
+        self.client_weights_list = None
+        self.client_weights = None
+        self.client_conflicts_accu = None
+        self.client_conflicts = None
+        self.latency = None
+
+
     def log(self, message):
         message = f"[Round: {str(self._round).zfill(4)}] " + message
         print(message);
@@ -100,6 +110,14 @@ class Server(object):
         self.update_type = update_type
         self.save = save
         self.number_of_classes = 100 if dataset == 'cifar100' else 10
+
+        # initialize parameter for DGT
+        self.cos_dict = np.zeros((number_of_clients, number_of_clients))
+        self.client_weights_list = {key: [0] for key in range(number_of_clients)}
+        self.client_weights = [0 for _ in range(number_of_clients)]
+        self.client_conflicts_accu = np.zeros(number_of_clients)
+        self.client_conflicts = np.zeros(number_of_clients)
+        self.latency = np.zeros(number_of_clients)
 
         # initialize weights of the model
         torch.manual_seed(self.seed)
@@ -215,32 +233,6 @@ class Server(object):
         new_model.load_state_dict(new_weights)
         return new_model
 
-    def aggregate_models_with_cache(self, sampled_client_indices, coeff):
-        new_model = copy.deepcopy(self.model)
-        averaged_weights = OrderedDict()
-
-        models = []
-
-        for i in range(self.num_clients):
-            if i in sampled_client_indices:
-                models.append(self.clients[i].client_current)
-            else:
-                if self.clients[i].client_previous is not None:
-                    models.append(self.clients[i].client_previous)
-
-        weight = 1 / len(models)
-
-        for i, model in enumerate(models):
-            local_weights = model.state_dict()
-            for key in self.model.state_dict().keys():
-                if i == 0:
-                    averaged_weights[key] = weight * local_weights[key]
-                else:
-                    averaged_weights[key] += weight * local_weights[key]
-
-        new_model.load_state_dict(averaged_weights)
-        return new_model
-
     def aggregate_models_scaffold(self, sampled_client_indices, coeff):
         total_delta = copy.deepcopy(self.model.state_dict())
         for key in total_delta:
@@ -268,6 +260,161 @@ class Server(object):
 
             client.c_global.load_state_dict(c_global_para)
         return self.aggregate_models(sampled_client_indices, coeff)
+
+    def aggregate_models_PV_DGT(self, sampled_client_indices, coeff):
+        def gradient_calibration_vaccine(gradient, project_target, i, j, cossim):
+            projection = (np.linalg.norm(gradient) * (self.cos_dict[i, j] * (1 - cossim ** 2) ** 0.5 - cossim * (
+                    1 - self.cos_dict[i, j] ** 2) ** 0.5)) / (np.linalg.norm(project_target) * (
+                    1 - self.cos_dict[i, j] ** 2) ** 0.5)
+            gradient = gradient + projection * project_target
+            return gradient
+
+        gradients = {}
+        sampled_client_indices.sort()
+        print('sampled_client_indices is ', sampled_client_indices)
+        # OTA2
+        rl = [i for i in range(20)]
+        unuploaded = [x for x in rl if x not in sampled_client_indices]
+        # 延迟计算
+        for i in unuploaded:
+            self.latency[i] += 1
+
+        for i in sampled_client_indices:
+            gradient = self.clients[i].get_gradient()
+            gradients[i] = gradient
+        round_client_conflicts = np.zeros(20)
+        print('初始化round_client_conflicts', round_client_conflicts)
+        conflicts_analysis = []
+        for i, g in gradients.items():
+            conflict_list_temp = 0
+            for j, h in gradients.items():
+                cos_sim = np.dot(gradients[i], gradients[j]) / (
+                            np.linalg.norm(gradients[i]) * np.linalg.norm(gradients[j]))
+                # if cos_sim < self.cos_dict[i, j] or cos_sim < 0:
+                # if cos_sim < 0:
+                # self.client_conflicts[i]=self.client_conflicts[i]+1
+                # self.client_conflicts[j]=self.client_conflicts[j]+1
+                # print('i is',i)
+                # 冲突数量
+                # round_client_conflicts[i]=round_client_conflicts[i]+1
+                # # print('j is',j)
+                # round_client_conflicts[j]=round_client_conflicts[j]+1
+                # 冲突程度
+                if cos_sim < 0:
+                    round_client_conflicts[i] = round_client_conflicts[i] - cos_sim
+                    round_client_conflicts[j] = round_client_conflicts[j] - cos_sim
+                    conflicts_analysis.append(round(cos_sim, 2))
+                    # OTA2
+                    conflict_list_temp += 1
+            self.client_weights_list[i].append(conflict_list_temp)
+            conflicts_analysis.sort()
+        ca_temp = round(np.average(conflicts_analysis), 2)
+        print('平均冲突程度', ca_temp, 'conflicts_analysis列表', conflicts_analysis)
+        self.ca4.append(ca_temp)
+        print('冲突序列', self.ca4)
+        # conflicts_analysis.sort()
+        # print('conflicts_analysis',conflicts_analysis)
+        # print('更新前客户端权重是',self.client_conflicts_accu)
+        # print('本轮参与客户端的冲突权重是',round_client_conflicts)
+        for k, v in enumerate(round_client_conflicts):
+            if k in sampled_client_indices:
+                # print('更新客户端权重k is', k)
+                self.client_conflicts_accu[k] = (round_client_conflicts[k] + self.client_conflicts_accu[k]) / 2
+        print('更新后客户端权重是', self.client_conflicts_accu)
+        # self.client_conflicts_accu=(self.round_client_conflicts+self.client_conflicts_accu)/2
+        self.client_weights = self.client_conflicts_accu
+        DTH = 1
+        print('DTH is ', DTH)
+        for i, g in gradients.items():
+            for j, h in gradients.items():
+                cos_sim = np.dot(gradients[i], gradients[j]) / (
+                            np.linalg.norm(gradients[i]) * np.linalg.norm(gradients[j]))
+                if cos_sim < 0 or cos_sim < self.cos_dict[i, j]:
+                    calibrated_gradient = gradient_calibration_vaccine(gradients[i], gradients[j], i, j, cos_sim)
+                    gradients[i] = calibrated_gradient
+                self.cos_dict[i, j] = round(min(max(0.3 * cos_sim + 0.7 * self.cos_dict[i, j], 0), DTH), 3)
+
+        gradients_list = []
+        gradients_list = list(gradients.values())
+        gradients_list = np.array(gradients_list)
+        sum_of_gradient = np.sum(gradients_list, axis=0) / len(gradients_list)
+        new_model = copy.copy(self.model)
+        new_model.to('cpu')
+        new_weights = new_model.state_dict()
+        global_gradient = self.model.unflatten_model(sum_of_gradient)
+        for key in new_model.state_dict().keys():
+            new_weights[key] = new_weights[key] - 1 * global_gradient[key]
+        new_model.load_state_dict(new_weights)
+        # OTA2
+        print('延迟参数', self.latency)
+        print('冲突量序列', self.client_weights_list)
+        return new_model
+
+    def aggregate_models_FedMMD(self, sampled_client_indices, coeff=1.0, eps=0.001):
+        # 1) Gather gradients from the sampled clients
+        gradients = []
+        distances = []
+        for idx in sampled_client_indices:
+            gradient = self.clients[idx].get_gradient()  # flattened gradient vector
+            gradients.append(gradient)
+
+            # If you want the MMD distance w.r.t. the current global model or among clients,
+            # you can store that here. As a placeholder, we assume each client object
+            # has a method get_mmd_distance(...) that returns a float:
+            mmd_dist = self.clients[idx].get_mmd_distance()
+            distances.append(mmd_dist)
+
+        # 2) Convert to numpy arrays for manipulation
+        gradients = np.array(gradients)  # shape: (#clients, total_params)
+        distances = np.array(distances)  # shape: (#clients,)
+
+        # 3) Compute weights (λ_k) based on distances
+        #    Below is a toy version of an entropy-based weighting scheme.
+        #    (You can replace this with your actual formula from the paper.)
+        #    For instance, if you have distances >= 0, we can do:
+        #       normalized_d = distances / sum(distances)
+        #       weight_k = - normalized_d[k] * log(normalized_d[k])
+        #    etc.
+        eps_ = 1e-12
+        distances = distances + eps_  # avoid zero in log
+        sum_distances = np.sum(distances)
+        if sum_distances < eps_:
+            # if all distances are zero, revert to uniform weighting
+            weights = np.ones_like(distances) / len(distances)
+        else:
+            normalized_d = distances / sum_distances
+            # Example "entropy-inspired" weighting:  w_k = - p_k log(p_k)
+            # Then we renormalize so that sum(w_k) = 1
+            import math
+            temp_w = [-p * math.log(p + eps_) for p in normalized_d]
+            w_sum = sum(temp_w)
+            weights = [w / (w_sum + eps_) for w in temp_w]
+        weights = np.array(weights)  # shape: (#clients,)
+
+        # 4) Combine gradients into a single global gradient using the weights
+        #    Weighted average of gradients:
+        #      global_grad = sum(λ_k * gradient_k)
+        #    In a plain FedAvg, this is just the mean.
+        #    Here we incorporate the distance-based λ_k.
+        weighted_gradients = weights.reshape(-1, 1) * gradients
+        global_grad_vector = np.sum(weighted_gradients, axis=0)  # shape: (total_params,)
+
+        # 5) Update the global model
+        new_model = copy.copy(self.model)
+        new_model.to('cpu')  # operate on CPU
+
+        new_weights = new_model.state_dict()
+        # Convert the global_grad_vector back to dict form
+        global_gradient_dict = self.model.unflatten_model(global_grad_vector)
+
+        # Apply the update to each parameter
+        for key in new_weights.keys():
+            # coefficient (coeff) can control step size,
+            # or you can do something like a learning rate
+            new_weights[key] = new_weights[key] - global_gradient_dict[key]
+
+        new_model.load_state_dict(new_weights)
+        return new_model
 
     def update_model(self, sampled_client_indices, update_method):
         if not sampled_client_indices:
@@ -306,6 +453,39 @@ class Server(object):
         # update model parameters of the selected clients and update the global model
         self.update_model(sampled_client_indices, update_method)
 
+        # send global model to the selected clients
+        message = self.CommunicationController.transmit_model(self.model)
+        self.log(message)
+
+    def train_FedOTA_selection(self, sample_method, update_method):
+        # assign new training and test set based on distribution
+        for client in self.clients:
+            new_train_set, new_test_set = self.DatasetController.get_dataset_for_client(client)
+
+            client.update_train(new_train_set, replace=True)
+            client.update_test(new_test_set, replace=True)
+
+        # train all clients model with local dataset
+        message = self.CommunicationController.update_selected_clients(self.update_type, all_client=True)
+        self.log(message)
+
+        # 选择客户端
+        # print('上传给客户端选择的权重向量是%s' %self.client_weights)
+        print('latency is', self.latency)
+        print('client_weights_list is', self.client_weights_list)
+        # print('选择结果',sample_method(self.client_weights,self.latency,self.client_weights_list))
+        message, sampled_client_indices = sample_method(self.client_weights, self.latency, self.client_weights_list)
+        print('选择的客户端是%s' % sampled_client_indices)
+        # print('selected clients are %s' %sampled_client_indices)
+        self.log(message)
+        # evaluate selected clients with local dataset
+        # message = self.CommunicationController.evaluate_all_models()
+        # self.log(message)
+
+        # update model parameters of the selected clients and update the global model
+        #全局模型更
+        #更新全局模型
+        self.update_model(sampled_client_indices, update_method)
         # send global model to the selected clients
         message = self.CommunicationController.transmit_model(self.model)
         self.log(message)
@@ -407,6 +587,14 @@ class Server(object):
                 self.train_without_drift(
                     self.CommunicationController.sample_clients,
                     self.aggregate_models)
+            elif self.run_type == 'fedOTA':
+                self.train_FedOTA_selection(
+                    self.CommunicationController.sample_clients_FedOTA,
+                    self.aggregate_models_PV_DGT())
+            elif self.run_type == 'fedMMD':
+                self.train_without_drift(
+                    self.CommunicationController.sample_clients_FedMMD,
+                    self.aggregate_models_FedMMD)
             else:
                 raise Exception("No federal learning method is found.")
 

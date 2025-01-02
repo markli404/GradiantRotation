@@ -226,6 +226,119 @@ class CommunicationController:
 
         return message, sampled_client_indices
 
+    def sample_clients_FedOTA(self, client_weights, latency, client_weights_list):
+        def fetch_rank_index(x):
+            dict_list = {}
+            for index, values in enumerate(sorted(x)):
+                dict_list[values] = index
+            result_list = []
+            for i in x:
+                result_list.append(dict_list[i])
+            return result_list
+
+        # print('client_weights in sample_clients_function %s' % client_weights)
+        if sum(client_weights) == 0:
+            # 全上传
+            sampled_client_indices = list(range(self.num_clients))
+            message = "All clients are selected at first round"
+
+            # 随机部分上传
+            # sampled_client_indices=[]
+            # # selection_count = int(20 * config.FRACTION)
+            # selection_count = int(20 * config.FRACTION_dgt)+int(20 * config.FRACTION_explore)
+            # sampled_client_indices=[]
+            # while len(sampled_client_indices)< selection_count:
+            #     n=random.randint(0,19)
+            #     if n not in sampled_client_indices:
+            #         sampled_client_indices.append(n)
+
+            self.sampled_clients_indices = sampled_client_indices
+            # message = "随机初始化"
+        else:
+            sorted_scores = sorted(range(len(client_weights)), key=lambda k: client_weights[k], reverse=False)
+            # sorted_scores = sorted(range(len(client_weights)),key=lambda k: client_weights[k], reverse=False)
+            print('排序后的客户端id向量', sorted_scores)
+
+            # # 固定探索利用概率
+            # #先选择冲突量少的客户端
+            selection_count_dgt = int(20 * config.FRACTION_dgt)
+            sampled_client_indices = sorted_scores[:selection_count_dgt]
+            print('冲突少客户端选择结果为：', sampled_client_indices)
+            # selection_count_explore = int(20 * config.FRACTION_explore - math.floor(rd/10)*0.1) #整体0.5概率，50轮 探索概率分别是40 30 20 10 0
+            selection_count_explore = int(20 * config.FRACTION_explore)  # 整体0.5概率，0.4
+
+            # 递减探索概率
+            # selection_count_dgt=int(20 * (config.FRACTION- (5-math.floor(rd/10))*0.1)) #利用概率
+            # sampled_client_indices=sorted_scores[:selection_count_dgt]
+            # print('冲突少客户端选择结果为：',sampled_client_indices,'利用客户端数量是',selection_count_dgt)
+            # selection_count_explore = int(20 * (5-math.floor(rd/10))*0.1)
+
+            # 再增加一定比例的探索客户端
+            # print('随机前的客户端列表')
+            explore_score = []
+            rl = [i for i in range(20)]
+            unselected = [x for x in rl if x not in sampled_client_indices]
+            print('待探索客户端是', unselected)
+            l, d, v = [], [], []
+            for i in unselected:
+                # 计算陈旧性：
+                l.append(latency[i])
+                d.append(np.std(client_weights_list[i]))
+                v.append(np.mean(client_weights_list[i]))
+                # explore_score.append(l+d+v)
+                # print('ldv of %s is %s,%s,%s'%(i,l,d,v))
+            # print('explore_score',explore_score)
+            rank_l, rank_d, rank_v = fetch_rank_index(l), fetch_rank_index(d), fetch_rank_index(v)
+
+            explore_score = [a + b + c for a, b, c in zip(rank_l, rank_d, rank_v)]
+            print('总分向量是', explore_score, '陈旧，标准差，均值是 %s,%s,%s' % (rank_l, rank_d, rank_v))
+            # print('sum(explore_score)',sum(explore_score))
+            # probabilities=explore_score/sum(explore_score)
+            sum_explore_score = sum(explore_score)
+            probabilities = [item / sum_explore_score for item in explore_score]
+
+            explore_clients_list = np.random.choice(unselected, size=selection_count_explore, p=probabilities)
+            # while len(sampled_client_indices)<(selection_count_explore+selection_count_dgt):
+            #   # print('探索概率向量是',probabilities)
+            #   cumulative_probabilities=np.cumsum(probabilities) / np.sum(probabilities)
+            #   n = np.random.choice(a=np.arange(len(probabilities)), p=cumulative_probabilities)
+            #   if n not in sampled_client_indices:
+            #       explore_clients_list.append(n)
+            #       # print(np.random.choice(a, size=3, p=[0.1, 0.1, 0.2, 0.3, 0.3]))   # 按照概率分布随机抽取三个元素
+            print('探索的客户端是', list(explore_clients_list), '利用客户端数量是', selection_count_explore)
+            sampled_client_indices = sampled_client_indices + list(explore_clients_list)
+            print('探索概率向量是', probabilities, '探索的客户端是', explore_clients_list,
+                  '补充随机客户端后选择结果为：', sampled_client_indices)
+            self.sampled_clients_indices = sampled_client_indices
+            # message = "All clients are selected"
+            # print('clients_weights_list is', clients_weights_list)
+            message = "clients selection"
+            # print('选择的客户端是',sampled_client_indices)
+
+    def sample_clients_FedMMD(self):
+        # 1. Determine how many clients to pick
+        num_sampled_clients = max(int(self.upload_chance * self.num_clients), 1)
+
+        # 2. Compute MMD distances for each client relative to the global model
+        all_distances = []
+        for idx, client in enumerate(self.clients):
+            mmd_dist = client.get_mmd_distance()
+            all_distances.append((idx, mmd_dist))  # store (client_index, distance)
+
+        # 3. Sort clients by their MMD distance in descending order (largest first)
+        all_distances.sort(key=lambda x: x[1], reverse=True)
+
+        # 4. Pick the top 'num_sampled_clients' from this sorted list
+        sampled = all_distances[:num_sampled_clients]
+        sampled_client_indices = [item[0] for item in sampled]
+
+        self.sampled_clients_indices = sampled_client_indices
+
+        # 5. Build a message for logging
+        message = f"{sampled_client_indices} clients selected (based on largest MMD)."
+
+        return message, sampled_client_indices
+
     def update_selected_clients(self, update_type, all_client=False):
         """Call "client_update" function of each selected client."""
         if all_client:
