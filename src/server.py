@@ -173,6 +173,7 @@ class Server(object):
             alpha = [0.5, 0.5, 0.5]
             # 生成样本
             samples = np.random.dirichlet(alpha, size=number_of_clients)
+            number_of_selected_classes_per_client.append(samples)
         else:
             raise ValueError(f"Invalid distribution type: {distribution_type}")
 
