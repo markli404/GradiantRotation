@@ -414,7 +414,6 @@ class Server(object):
             gradients[i] = w * gradients[i]
             print(0)
 
-
         gradients = np.array(gradients)
         sum_of_gradient = np.sum(gradients, axis=0) / len(gradients)
 
@@ -609,7 +608,7 @@ class Server(object):
             elif self.run_type == 'fedOTA':
                 self.train_FedOTA_selection(
                     self.CommunicationController.sample_clients_FedOTA,
-                    self.aggregate_models_PV_DGT())
+                    self.aggregate_models_PV_DGT)
             elif self.run_type == 'fedMMD':
                 self.train_without_drift(
                     self.CommunicationController.sample_clients_FedMMD,

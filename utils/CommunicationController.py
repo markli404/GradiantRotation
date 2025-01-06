@@ -317,6 +317,8 @@ class CommunicationController:
             message = "clients selection"
             # print('选择的客户端是',sampled_client_indices)
 
+        return message, sampled_client_indices
+
     def sample_clients_FedMMD(self):
         # 1. Determine how many clients to pick
         num_sampled_clients = max(int(self.upload_chance * self.num_clients), 1)
