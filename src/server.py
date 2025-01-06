@@ -99,15 +99,17 @@ class Server(object):
               dataset,
               number_of_training_samples,
               number_of_testing_samples,
+              upload_chance,
+              exploration_rate,
+              utilization_rate,
               batch_size,
               local_epoch,
               total_rounds,
               run_type,
-              update_type,
+              distribution_type,
               save):
         self.total_rounds = total_rounds
         self.run_type = run_type
-        self.update_type = update_type
         self.save = save
         self.number_of_classes = 100 if dataset == 'cifar100' else 10
 
@@ -138,10 +140,14 @@ class Server(object):
                                            number_of_selected_classes=number_of_selected_classes,
                                            number_of_classes=self.number_of_classes,
                                            batch_size=batch_size,
-                                           local_epoch=local_epoch)
+                                           local_epoch=local_epoch,
+                                           distribution_type=distribution_type)
 
         # initialize CommunicationController
-        self.CommunicationController = CommunicationController(self.clients)
+        self.CommunicationController = CommunicationController(self.clients,
+                                                               upload_chance=upload_chance,
+                                                               exploration_rate=exploration_rate,
+                                                               utilization_rate=utilization_rate)
 
         # send the model skeleton to all clients
         message = self.CommunicationController.transmit_model(self.model, to_all_clients=True)
@@ -154,7 +160,7 @@ class Server(object):
                        number_of_classes,
                        batch_size,
                        local_epoch,
-                       distribution_type='uniform'):
+                       distribution_type='normal'):
         clients, number_of_selected_classes_per_client = [], []
         client_idx = np.arange(number_of_clients)
         np.random.shuffle(client_idx)
@@ -167,6 +173,7 @@ class Server(object):
             for _ in range(number_of_clients):
                 # TODO
                 n = np.random.normal(number_of_selected_classes, 2, 1)
+                n = max(min(10, int(n)), 2)
                 number_of_selected_classes_per_client.append(n)
         elif distribution_type == 'dirichlet':
             # 定义浓度参数
@@ -369,38 +376,49 @@ class Server(object):
         gradients = np.array(gradients)  # shape: (#clients, total_params)
         distances = np.array(distances)  # shape: (#clients,)
 
-        # 3) Compute weights (λ_k) based on distances
-        #    Below is a toy version of an entropy-based weighting scheme.
-        #    (You can replace this with your actual formula from the paper.)
-        #    For instance, if you have distances >= 0, we can do:
-        #       normalized_d = distances / sum(distances)
-        #       weight_k = - normalized_d[k] * log(normalized_d[k])
-        #    etc.
-        eps_ = 1e-12
-        distances = distances + eps_  # avoid zero in log
-        sum_distances = np.sum(distances)
-        if sum_distances < eps_:
-            # if all distances are zero, revert to uniform weighting
-            weights = np.ones_like(distances) / len(distances)
+        # 3) Sort distances and identify suspicious values
+        sorted_indices = np.argsort(distances)
+        sorted_distances = distances[sorted_indices]
+
+        # Compute the SKNQ value
+        max_dist = sorted_distances[-1]
+        min_dist = sorted_distances[0]
+        if len(sorted_distances) > 1:
+            sknq_value = abs(sorted_distances[-1] - sorted_distances[-2]) / (max_dist - min_dist + eps)
         else:
-            normalized_d = distances / sum_distances
-            # Example "entropy-inspired" weighting:  w_k = - p_k log(p_k)
-            # Then we renormalize so that sum(w_k) = 1
-            import math
-            temp_w = [-p * math.log(p + eps_) for p in normalized_d]
-            w_sum = sum(temp_w)
-            weights = [w / (w_sum + eps_) for w in temp_w]
-        weights = np.array(weights)  # shape: (#clients,)
+            sknq_value = 0  # If there's only one client, no need to calculate
 
-        # 4) Combine gradients into a single global gradient using the weights
-        #    Weighted average of gradients:
-        #      global_grad = sum(λ_k * gradient_k)
-        #    In a plain FedAvg, this is just the mean.
-        #    Here we incorporate the distance-based λ_k.
-        weighted_gradients = weights.reshape(-1, 1) * gradients
-        global_grad_vector = np.sum(weighted_gradients, axis=0)  # shape: (total_params,)
+        # 4) Check SKNQ threshold and remove suspicious values
+        sknq_threshold = 0.5
+        if sknq_value >= sknq_threshold:
+            # Remove the two most suspicious values
+            suspicious_indices = sorted_indices[-2:]
+            gradients = np.delete(gradients, suspicious_indices, axis=0)
+            distances = np.delete(distances, suspicious_indices, axis=0)
 
-        # 5) Update the global model
+        # 5) Normalize distances for entropy weight calculation
+        max_dist = np.max(distances)
+        min_dist = np.min(distances)
+        Y_i = (distances - min_dist) / (max_dist - min_dist + eps)
+
+        # 6) Calculate entropy for each client
+        p_i = Y_i / (np.sum(Y_i) + eps)
+        n = len(distances)
+        E_i = -np.sum(p_i * np.log(p_i + eps)) # Add eps to avoid log(0)
+
+        # 7) Calculate weight coefficients (λ_i) based on entropy
+        lambda_i = 1 - E_i
+        lambda_i /= n - np.sum(E_i)
+
+        for i, w in enumerate(gradients):
+            gradients[i] = w * gradients[i]
+            print(0)
+
+
+        gradients = np.array(gradients)
+        sum_of_gradient = np.sum(gradients, axis=0) / len(gradients)
+
+        # 8) Update the global model
         new_model = copy.copy(self.model)
         new_model.to('cpu')  # operate on CPU
 
@@ -441,7 +459,7 @@ class Server(object):
             client.update_test(new_test_set, replace=True)
 
         # train all clients model with local dataset
-        message = self.CommunicationController.update_selected_clients(self.update_type, all_client=True)
+        message = self.CommunicationController.update_selected_clients(self.run_type, all_client=True)
         self.log(message)
 
         message, sampled_client_indices = sample_method()

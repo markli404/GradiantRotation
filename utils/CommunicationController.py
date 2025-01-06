@@ -16,12 +16,14 @@ from utils.utils import pretty_list
 
 
 class CommunicationController:
-    def __init__(self, clients, upload_chance=0.3):
+    def __init__(self, clients, upload_chance, exploration_rate, utilization_rate):
         self.weight = None
         self.improvement = None
         self.num_clients = len(clients)
         self.clients = clients
         self.upload_chance = upload_chance
+        self.exploration_rate = exploration_rate
+        self.utilization_rate = utilization_rate
 
         self.cos = CosineSimilarity(dim=0, eps=1e-6)
         self.sampled_clients_indices = None
@@ -261,11 +263,11 @@ class CommunicationController:
 
             # # 固定探索利用概率
             # #先选择冲突量少的客户端
-            selection_count_dgt = int(20 * config.FRACTION_dgt)
+            selection_count_dgt = int(self.num_clients * self.utilization_rate)
             sampled_client_indices = sorted_scores[:selection_count_dgt]
             print('冲突少客户端选择结果为：', sampled_client_indices)
             # selection_count_explore = int(20 * config.FRACTION_explore - math.floor(rd/10)*0.1) #整体0.5概率，50轮 探索概率分别是40 30 20 10 0
-            selection_count_explore = int(20 * config.FRACTION_explore)  # 整体0.5概率，0.4
+            selection_count_explore = int(self.num_clients * self.exploration_rate)  # 整体0.5概率，0.4
 
             # 递减探索概率
             # selection_count_dgt=int(20 * (config.FRACTION- (5-math.floor(rd/10))*0.1)) #利用概率

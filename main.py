@@ -23,11 +23,16 @@ def main():
     # 实验设定相关
     parser.add_argument('--model_name', type=str, default='CNN')
     parser.add_argument('--run_type', type=str, default='fedMMD')
-    parser.add_argument('--update_type', type=str, default='fedavg') #param_freeze
+    parser.add_argument('--distribution_type', type=str, default='uniform')
 
-    # parser.add_argument('--mu', type=str, default='0.01')
     parser.add_argument('--number_of_clients', type=int, default=20)
-    parser.add_argument('--number_of_selected_classes', type=int, default=10)
+    parser.add_argument('--number_of_selected_classes', type=int, default=5)
+
+    # 客户端选择相关
+    parser.add_argument('--upload_chance', type=float, default=0.3)
+    parser.add_argument('--exploration_rate', type=float, default=0.3)
+    parser.add_argument('--utilization_rate', type=float, default=0.3)
+
     parser.add_argument('--round', type=int, default=50)
 
     # 程序相关
@@ -55,12 +60,16 @@ def main():
                              dataset=args.dataset,
                              number_of_training_samples=args.number_of_training_samples,
                              number_of_testing_samples=args.number_of_testing_samples,
+                             upload_chance=args.upload_chance,
+                             exploration_rate=args.exploration_rate,
+                             utilization_rate=args.utilization_rate,
                              batch_size=args.batch_size,
                              local_epoch=args.epoch,
                              total_rounds=args.round,
                              run_type=args.run_type,
-                             update_type=args.update_type,
-                             save=args.save)
+                             distribution_type=args.distribution_type,
+                             save=args.save,
+                             )
 
         # do federate learning
         accu, round_uploads = central_server.fit()
