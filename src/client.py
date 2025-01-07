@@ -31,7 +31,7 @@ class Client(object):
         self.criterion = 'torch.nn.CrossEntropyLoss'
         self.optimizer = 'torch.optim.SGD'
         self.optim_config = {
-            'lr': 0.1,
+            'lr': 0.01,
             'momentum': 0.9,
         }
 
@@ -387,3 +387,31 @@ class Client(object):
             plt.axis('off')
 
         plt.show()
+
+
+# data = data.cpu().numpy()  # 如果 data 在 GPU 上
+# labels = labels.cpu().numpy()  # 如果 labels 在 GPU 上
+# import matplotlib.pyplot as plt
+#
+# # 定义类别名称
+# class_names = ["Class 0", "Class 1", "Class 2", "Class 3", "Class 4",
+#                "Class 5", "Class 6", "Class 7", "Class 8", "Class 9"]
+#
+# # 创建 5x5 网格
+# fig, axes = plt.subplots(5, 5, figsize=(10, 10))
+#
+# for i, ax in enumerate(axes.flatten()):
+#     # 如果 data 超出范围，跳出循环
+#     if i >= len(data):
+#         break
+#
+#     # 获取单张图片并转置为 [H, W, C] 格式
+#     image = data[i].transpose(1, 2, 0)
+#
+#     # 显示图片
+#     ax.imshow(image)
+#     ax.axis('off')  # 隐藏坐标轴
+#     ax.set_title(labels[i])  # 显示对应的类别
+#
+# plt.tight_layout()
+# plt.show()

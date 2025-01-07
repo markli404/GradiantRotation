@@ -18,18 +18,18 @@ def main():
     parser.add_argument('--number_of_testing_samples', type=int, default=128)
 
     # 数据集相关
-    parser.add_argument('--dataset', type=str, default='mnist')
+    parser.add_argument('--dataset', type=str, default='cinic10')
 
     # 实验设定相关
-    parser.add_argument('--model_name', type=str, default='CNN')
-    parser.add_argument('--run_type', type=str, default='fedOTA')
-    parser.add_argument('--distribution_type', type=str, default='uniform')
+    parser.add_argument('--model_name', type=str, default='CNN2')
+    parser.add_argument('--run_type', type=str, default='fedavg')
+    parser.add_argument('--distribution_type', type=str, default='dirichlet')
 
     parser.add_argument('--number_of_clients', type=int, default=20)
     parser.add_argument('--number_of_selected_classes', type=int, default=5)
 
     # 客户端选择相关
-    parser.add_argument('--upload_chance', type=float, default=0.3)
+    parser.add_argument('--upload_chance', type=float, default=0.8)
     parser.add_argument('--exploration_rate', type=float, default=0.3)
     parser.add_argument('--utilization_rate', type=float, default=0.3)
 

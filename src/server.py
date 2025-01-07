@@ -172,15 +172,16 @@ class Server(object):
         elif distribution_type == 'normal':
             for _ in range(number_of_clients):
                 # TODO
-                n = np.random.normal(number_of_selected_classes, 2, 1)
-                n = max(min(10, int(n)), 2)
+                n = np.random.normal(number_of_selected_classes, 3, 1)
+                n = max(min(self.number_of_classes, int(n)), 1)
                 number_of_selected_classes_per_client.append(n)
         elif distribution_type == 'dirichlet':
-            # 定义浓度参数
-            alpha = [0.5, 0.5, 0.5]
-            # 生成样本
-            samples = np.random.dirichlet(alpha, size=number_of_clients)
-            number_of_selected_classes_per_client.append(samples)
+            for _ in range(number_of_clients):
+                alpha = np.ones(self.number_of_classes) * 1.0
+                weights = np.random.dirichlet(alpha)
+                n = np.random.choice(np.arange(1, self.number_of_classes+1), p=weights)
+                n = max(min(self.number_of_classes, int(n)), 1)
+                number_of_selected_classes_per_client.append(n)
         else:
             raise ValueError(f"Invalid distribution type: {distribution_type}")
 
