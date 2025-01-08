@@ -166,33 +166,37 @@ class Server(object):
         np.random.shuffle(client_idx)
 
         # generate distribution for each client
+        distributions = []
+
         if distribution_type == 'uniform':
             for _ in range(number_of_clients):
-                number_of_selected_classes_per_client.append(number_of_selected_classes)
+                distribution = [0.0] * number_of_classes
+                distribution = np.array(distribution)
+                selected_classes = random.sample(range(number_of_classes), number_of_selected_classes)
+                for index in selected_classes:
+                    distribution[index] = 1.0 / number_of_selected_classes
+
+                distributions.append(distribution)
         elif distribution_type == 'normal':
             for _ in range(number_of_clients):
-                # TODO
                 n = np.random.normal(number_of_selected_classes, 3, 1)
                 n = max(min(self.number_of_classes, int(n)), 1)
-                number_of_selected_classes_per_client.append(n)
+
+                distribution = [0.0] * number_of_classes
+                distribution = np.array(distribution)
+                selected_classes = random.sample(range(number_of_classes), n)
+                for index in selected_classes:
+                    distribution[index] = 1.0 / number_of_selected_classes
+
+                distributions.append(distribution)
+
         elif distribution_type == 'dirichlet':
-            for _ in range(number_of_clients):
-                alpha = np.ones(self.number_of_classes) * 1.0
-                weights = np.random.dirichlet(alpha)
-                n = np.random.choice(np.arange(1, self.number_of_classes+1), p=weights)
-                n = max(min(self.number_of_classes, int(n)), 1)
-                number_of_selected_classes_per_client.append(n)
+            alpha = np.ones(self.number_of_classes) * 1.0
+            distributions = np.random.dirichlet(alpha, size=number_of_clients)
         else:
             raise ValueError(f"Invalid distribution type: {distribution_type}")
 
-        for i in range(number_of_clients):
-            distribution = [0.0] * number_of_classes
-            distribution = np.array(distribution)
-            number_of_selected_classes = number_of_selected_classes_per_client[i]
-            selected_classes = random.sample(range(number_of_classes), number_of_selected_classes)
-            for index in selected_classes:
-                distribution[index] = 1.0 / number_of_selected_classes
-
+        for i, distribution in enumerate(distributions):
             client = Client(client_id=i,
                             device=self.device,
                             distribution=distribution,

@@ -23,7 +23,7 @@ def main():
     # 实验设定相关
     parser.add_argument('--model_name', type=str, default='CNN2')
     parser.add_argument('--run_type', type=str, default='fedavg')
-    parser.add_argument('--distribution_type', type=str, default='dirichlet')
+    parser.add_argument('--distribution_type', type=str, default='uniform')
 
     parser.add_argument('--number_of_clients', type=int, default=20)
     parser.add_argument('--number_of_selected_classes', type=int, default=5)
