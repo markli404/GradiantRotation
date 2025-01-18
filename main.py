@@ -18,11 +18,11 @@ def main():
     parser.add_argument('--number_of_testing_samples', type=int, default=128)
 
     # 数据集相关
-    parser.add_argument('--dataset', type=str, default='cinic10')
+    parser.add_argument('--dataset', type=str, default='cifar10')
 
     # 实验设定相关
     parser.add_argument('--model_name', type=str, default='CNN2')
-    parser.add_argument('--run_type', type=str, default='fedavg')
+    parser.add_argument('--run_type', type=str, default='fedMMD')
     parser.add_argument('--distribution_type', type=str, default='uniform')
 
     parser.add_argument('--number_of_clients', type=int, default=20)

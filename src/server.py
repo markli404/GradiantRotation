@@ -409,33 +409,26 @@ class Server(object):
         # 6) Calculate entropy for each client
         p_i = Y_i / (np.sum(Y_i) + eps)
         n = len(distances)
-        E_i = -np.sum(p_i * np.log(p_i + eps)) # Add eps to avoid log(0)
+        E_i = -p_i * np.log(p_i + eps) / np.log(n) # Add eps to avoid log(0)
 
         # 7) Calculate weight coefficients (λ_i) based on entropy
         lambda_i = 1 - E_i
         lambda_i /= n - np.sum(E_i)
 
         for i, w in enumerate(gradients):
-            gradients[i] = w * gradients[i]
-            print(0)
+            gradients[i] = w * lambda_i[i]
 
         gradients = np.array(gradients)
-        sum_of_gradient = np.sum(gradients, axis=0) / len(gradients)
+        sum_of_gradient = np.sum(gradients, axis=0)
 
         # 8) Update the global model
         new_model = copy.copy(self.model)
         new_model.to('cpu')  # operate on CPU
 
         new_weights = new_model.state_dict()
-        # Convert the global_grad_vector back to dict form
-        global_gradient_dict = self.model.unflatten_model(global_grad_vector)
-
-        # Apply the update to each parameter
-        for key in new_weights.keys():
-            # coefficient (coeff) can control step size,
-            # or you can do something like a learning rate
-            new_weights[key] = new_weights[key] - global_gradient_dict[key]
-
+        global_gradient = self.model.unflatten_model(sum_of_gradient)
+        for key in new_model.state_dict().keys():
+            new_weights[key] = new_weights[key] - 1 * global_gradient[key]
         new_model.load_state_dict(new_weights)
         return new_model
 
